@@ -218,7 +218,7 @@ if [ "${nomake}" = "no" ]; then
 			PACKAGE_VERSION="${PACKAGE_VERSION:-${pkg_version}}"
 
 		find "${rom_dir}" \( -name '*.z64' -o -name '*.v64' -o -name '*.n64' \) \
-			-a \( -exec ./make-patch \{\} \; , -exec ./make-patch-vc \{\} \; \)
+			-a \( -exec ./make-patch \{\} \; -exec ./make-patch-vc \{\} \; \)
 	)
 fi
 
