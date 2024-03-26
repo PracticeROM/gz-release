@@ -1,0 +1,348 @@
+#!/bin/sh
+
+set -e
+
+usage()
+{
+	echo 'Usage:  gz-release  [-n|--name <pkg-name=gz>]'
+	echo '                    [-v|--version <pkg-version=<git-describe>>]'
+	echo '                    [-r|--romdir <rom-dir=roms>]'
+	echo '                    [-p|--platform <platform=<auto-detect>>]'
+	echo '                    [--nomake] [-y] [-j[<N>]] [-u <URL>]'
+	echo '                    [-b <branch>] [-xz] [-7z] {<src-dir>|-}'
+	echo ''
+	echo 'Options:'
+	echo '    -n|--name <pkg-name>'
+	echo '        Specify the release name.'
+	echo '    -v|--version <pkg-version>'
+	echo '        Specify the release version.'
+	echo '    -r|--romdir <rom-dir>'
+	echo '        Path to the directory containing roms to build and create'
+	echo '        patches for.'
+	echo '    -p|--platform <platform>'
+	echo '        Specify the target platform to create a release for.'
+	echo '        Defaults to the current host platform. Possible values:'
+	echo '            linux-gnu-x86_64'
+	echo '            windows-i686'
+	echo '            macos-x86_64        (requires mac platform, or linux'
+	echo '                                 with hfsprogs and guestmount or'
+	echo '                                 root privilege)'
+	echo '            all                 (all of the above)'
+	echo '    --nomake'
+	echo '        Do not run make in the source directory (run manually'
+	echo '        first).'
+	echo '    -y'
+	echo '        Do not ask for confirmation.'
+	echo '    -j<N>'
+	echo '        Pass -jN to make.'
+	echo '    -u <URL>'
+	echo '        Specify the remote repository to clone if not using a'
+	echo '        local repository.'
+	echo '    -b <branch>'
+	echo '        Specify the branch to checkout when cloning a remote'
+	echo '        repository.'
+	echo '    -xz'
+	echo '        Compress linux release with xz instead of gzip.'
+	echo '    -7z'
+	echo '        Compress windows release with 7zip instead of zip.'
+	echo '    <src-dir>|-'
+	echo '        Specify the directory of the source repository, or - to'
+	echo '        clone a remote repository into a temporary directory.'
+	echo ''
+	echo 'Environment variables can be used to pass build flags to make.'
+	exit 1
+}
+
+if uname -o >/dev/null 2>&1; then
+	os="`uname -o`"
+else
+	os="`uname -s`"
+fi
+machine="`uname -m`"
+
+case "${os}-${machine}" in
+	GNU/Linux-x86_64)
+		build_platform="linux-gnu-x86_64"
+		;;
+	Msys-*)
+		build_platform="windows-i686"
+		;;
+	Darwin-x86_64)
+		build_platform="macos-x86_64"
+		;;
+	*)
+		build_platform=""
+		;;
+esac
+
+pkg_name="gz"
+pkg_version=""
+rom_dir="roms"
+platform="${build_platform}"
+nomake="no"
+y="no"
+j="-j1"
+u="https://github.com/glankk/gz"
+b=""
+cxz="no"
+c7z="no"
+src_dir=""
+clone="no"
+
+while [ -n "${1}" ]; do
+	case "${1}" in
+		-n|--name)
+			if [ -z "${2}" ]; then usage; fi
+			pkg_name="${2}"
+			shift
+			;;
+		-v|--version)
+			if [ -z "${2}" ]; then usage; fi
+			pkg_version="${2}"
+			shift
+			;;
+		-r|--romdir)
+			if [ -z "${2}" ]; then usage; fi
+			rom_dir="${2}"
+			shift
+			;;
+		-p|--platform)
+			if [ -z "${2}" ]; then usage; fi
+			platform="${2}"
+			shift
+			;;
+		--nomake)
+			nomake="yes"
+			;;
+		-y)
+			y="yes"
+			;;
+		-j*)
+			j="${1}"
+			;;
+		-u)
+			if [ -z "${2}" ]; then usage; fi
+			u="${2}"
+			shift
+			;;
+		-b)
+			if [ -z "${2}" ]; then usage; fi
+			b="${2}"
+			shift
+			;;
+		-xz)
+			cxz="yes"
+			;;
+		-7z)
+			c7z="yes"
+			;;
+		*)
+			if [ -n "${src_dir}" ]; then usage; fi
+			src_dir="${1}"
+			;;
+	esac
+	shift
+done
+
+if [ -z "${src_dir}" ]; then usage; fi
+if [ -z "${platform}" ]; then echo 'unable to detect platform!'; exit 1; fi
+
+if [ "${src_dir}" = "-" ]; then
+	clone="yes"
+	src_dir="`mktemp -d`"
+
+	trap "rm -rf ${src_dir}" EXIT INT QUIT TERM
+
+	git clone "${u}" "${src_dir}"
+
+	if [ -n "${b}" ]; then
+		git -C "${src_dir}" checkout "${b}"
+	fi
+
+	git -C "${src_dir}" submodule update --init --recursive
+fi
+
+if [ "${nomake}" = "no" ]; then
+	if [ "${y}" = "no" ]; then
+		if ! type mips64-gcc >/dev/null 2>&1 && \
+			! type mips64-ultra-elf-gcc >/dev/null 2>&1; \
+		then
+			echo 'warning: no mips64-gcc or mips64-ultra-elf-gcc found.'
+			printf 'continue? [y/N] '
+			read yn
+			case "$yn" in [yY]*) ;; *) exit 1 ;; esac
+		fi
+
+		if ! type powerpc-eabi-gcc >/dev/null 2>&1; then
+			echo 'warning: no powerpc-eabi-gcc found.'
+			printf 'continue? [y/N] '
+			read yn
+			case "$yn" in [yY]*) ;; *) exit 1 ;; esac
+		fi
+	fi
+
+	rom_dir="`cd "${rom_dir}" && pwd`"
+	roms="`find "${rom_dir}" -name '*.z64' -o -name '*.v64' -o -name '*.n64'`"
+
+	if [ "${y}" = "no" ] && [ -z "${roms}" ]; then
+		echo 'warning: no roms found.'
+		printf 'continue? [y/N] '
+		read yn
+		case "$yn" in [yY]*) ;; *) exit 1 ;; esac
+	fi
+
+	(
+		cd "${src_dir}"
+
+		if [ "${clone}" = "no" ]; then
+			make "${j}" clean distclean
+			make "${j}" clean-homeboy || true
+
+			if [ -n "${b}" ]; then
+				git checkout "${b}"
+				git submodule update --init --recursive
+			fi
+		fi
+
+		if [ -z "${pkg_version}" ]; then
+			pkg_version="`git describe --tags --dirty`"
+		fi
+
+		targets="all all-hooks"
+
+		ret=0; make -qs all-homeboy || ret=$?
+		if [ ${ret} -ne 2 ]; then targets="${targets} all-homeboy"; fi
+
+		make "${j}" ${targets} \
+			PACKAGE_TARNAME="${PACKAGE_TARNAME:-${pkg_name}}" \
+			PACKAGE_VERSION="${PACKAGE_VERSION:-${pkg_version}}"
+
+		find "${rom_dir}" \( -name '*.z64' -o -name '*.v64' -o -name '*.n64' \) \
+			-a \( -exec ./make-patch \{\} \; , -exec ./make-patch-vc \{\} \; \)
+	)
+fi
+
+if [ -z "${pkg_version}" ]; then
+	pkg_version="`git -C "${src_dir}" describe --tags --dirty`"
+fi
+pkg_string="${pkg_name}-${pkg_version}"
+
+copy_files()
+{
+	mkdir -p "${1}"
+	cp -pR \
+		"common/"* \
+		"${src_dir}/gzi" \
+		"${src_dir}/ups" \
+		"${1}"
+
+	mkdir -p "${1}/lua"
+	cp -pR \
+		"${src_dir}/lua/rom_table.lua" \
+		"${src_dir}/lua/inject_ucode.lua" \
+		"${1}/lua"
+
+	mkdir -p "${1}/homeboy/bin/hb-NACE"
+	cp -pR \
+		"${src_dir}/homeboy/bin/hb-NACE/homeboy.bin" \
+		"${1}/homeboy/bin/hb-NACE"
+
+	mkdir -p "${1}/homeboy/bin/hb-NACJ"
+	cp -pR \
+		"${src_dir}/homeboy/bin/hb-NACJ/homeboy.bin" \
+		"${1}/homeboy/bin/hb-NACJ"
+}
+
+make_release()
+{
+	cplatform="${1}"
+	cpkg_string="${pkg_string}-${cplatform}"
+
+	case "${cplatform}" in
+		linux-gnu-x86_64)
+			rm -rf "${cpkg_string}"
+
+			unzip -d "${cpkg_string}" "platforms/${cplatform}.zip"
+			copy_files "${cpkg_string}"
+
+			if [ "${cxz}" = "yes" ]; then
+				(cd "${cpkg_string}" && \
+					XZ_OPT=-9 tar -cJf "../${cpkg_string}.tar.xz" .)
+			else
+				(cd "${cpkg_string}" && \
+					GZIP_OPT=-9 tar -czf "../${cpkg_string}.tar.gz" .)
+			fi
+
+			rm -rf "${cpkg_string}"
+			;;
+		windows-i686)
+			rm -rf "${cpkg_string}"
+
+			unzip -d "${cpkg_string}" "platforms/${cplatform}.zip"
+			copy_files "${cpkg_string}"
+
+			if [ "${c7z}" = "yes" ]; then
+				(cd "${cpkg_string}" && \
+					7z a -m0=lzma2 -mx=9 -ms=on "../${cpkg_string}.7z" .)
+			else
+				(cd "${cpkg_string}" && \
+					zip -9 -r "../${cpkg_string}.zip" .)
+			fi
+
+			rm -rf "${cpkg_string}"
+			;;
+		macos-x86_64)
+			rm -rf "${cpkg_string}"
+
+			unzip -d "${cpkg_string}" "platforms/${cplatform}.zip"
+			copy_files "${cpkg_string}/gz-gui.app/Contents/Resources"
+			cp -pR "common/readme.url" "${cpkg_string}"
+
+			if [ "$build_platform" = "macos-x86_64" ]; then
+				hdiutil create -ov -volname "${pkg_name}" -srcfolder "${cpkg_string}" \
+					"${cpkg_string}.dmg"
+			else
+				img_size="`du -sb ${cpkg_string} | awk '{print $1}'`"
+				img_size="$(( (${img_size}+1024*1024-1) / (1024*1024) + 1 ))"
+
+				dd if=/dev/zero of="${cpkg_string}.dmg" bs=1M count="${img_size}"
+				mkfs.hfsplus -v "${pkg_name}" "${cpkg_string}.dmg"
+
+				mkdir "${cpkg_string}.mnt"
+				if type guestmount >/dev/null 2>&1; then
+					guestmount --format=raw -a "${cpkg_string}.dmg" -m /dev/sda \
+						-w "${cpkg_string}.mnt"
+				else
+					sudo mount -o loop "${cpkg_string}.dmg" "${cpkg_string}.mnt"
+					sudo chmod 0777 "${cpkg_string}.mnt"
+				fi
+
+				cp -pR "${cpkg_string}"/* "${cpkg_string}.mnt"
+				sync
+
+				if type guestunmount >/dev/null 2>&1; then
+					guestunmount "${cpkg_string}.mnt"
+				else
+					sudo umount "${cpkg_string}.mnt"
+				fi
+
+				rmdir "${cpkg_string}.mnt"
+			fi
+			rm -rf "${cpkg_string}"
+			;;
+		*)
+			echo 'unknown platform: '"${cplatform}"
+			exit 1
+			;;
+	esac
+}
+
+if [ "${platform}" = "all" ]; then
+	all_platforms="linux-gnu-x86_64 windows-i686 macos-x86_64"
+
+	for platform in ${all_platforms}; do
+		make_release "${platform}"
+	done
+else
+	make_release "${platform}"
+fi

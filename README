@@ -1,0 +1,11 @@
+Script for creating gz release packages.
+
+Requires:
+- Tools to build gz and homeboy
+- git
+- unzip
+- gzip or xz for creating linux releases
+- zip or 7zip for creating windows releases
+- hfsprogs and guestmount for creating macos releases on linux
+
+See ./gz-release for usage.
