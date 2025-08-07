@@ -205,7 +205,7 @@ if [ "${nomake}" = "no" ]; then
 		fi
 
 		if [ -z "${pkg_version}" ]; then
-			pkg_version="`git describe --tags --dirty`"
+			pkg_version="`git describe --tags --match 'v[0-9]*' --dirty`"
 		fi
 
 		targets="all all-hooks"
@@ -223,7 +223,7 @@ if [ "${nomake}" = "no" ]; then
 fi
 
 if [ -z "${pkg_version}" ]; then
-	pkg_version="`git -C "${src_dir}" describe --tags --dirty`"
+	pkg_version="`git -C "${src_dir}" describe --tags --match 'v[0-9]*' --dirty`"
 fi
 pkg_string="${pkg_name}-${pkg_version}"
 
