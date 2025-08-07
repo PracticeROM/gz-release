@@ -1,0 +1,129 @@
+name: Build linux-gnu-x86_64 platform package
+
+on:
+  workflow_call:
+    inputs:
+      repository:
+        type: string
+        default: PracticeROM/gz-release
+      ref:
+        type: string
+        default: master
+
+jobs:
+  build:
+    name: Build linux-gnu-x86_64 platform package
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Update system package index
+        run: |
+          sudo apt-get update
+
+      - name: Install system packages
+        run: |
+          sudo apt-get install -y curl liblua5.3-dev nodejs qt6-base-dev qt6-base-dev-tools
+
+      - name: Checkout gz-release
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.ref }}
+          path: gz-release
+
+      - name: Checkout n64 tools
+        uses: actions/checkout@v4
+        with:
+          repository: glankk/n64
+          ref: b8e79f360999b548d3bcdeab8bc43f7a9ccc1719
+          path: n64
+
+      - name: Build n64 tools
+        run: |
+          cd n64
+          ./configure --without-toolchain
+          make all-ed64rdb all-libgru
+
+      - name: Checkout gzinject
+        uses: actions/checkout@v4
+        with:
+          repository: PracticeROM/gzinject
+          ref: e0ce0c892c4c83e7433f808ecb9fc50d42815de2
+          path: gzinject
+
+      - name: Build gzinject
+        run: |
+          cd gzinject
+          ./configure
+          make
+
+      - name: Checkout gz-gui
+        uses: actions/checkout@v4
+        with:
+          repository: glankk/gz-gui
+          ref: 1cbfc5bf93fd87f3aa6cb52a51119e9c650d1554
+          path: gz-gui
+
+      - name: Build gz-gui
+        run: |
+          cd gz-gui
+          qmake6
+          make release
+
+      - name: Install files
+        run: |
+          pkg="linux-gnu-x86_64"
+          src="gz-release/platforms/${pkg}"
+          dst="${pkg}"
+
+          mkdir -p "${dst}"
+          mkdir "${dst}"/bin/
+          mkdir "${dst}"/lib/
+
+          install -s gz-gui/gz-gui "${dst}"
+          cp "${src}"/{inject_ucode,patch-rom,patch-wad} "${dst}"/
+          install -s n64/src/{ed64rdb/ed64rdb,libgru/gru} "${dst}"/bin/
+          install -s gzinject/gzinject "${dst}"/bin/
+
+          # Based on linuxdeployqt
+          plugindir=$(/usr/lib/qt6/bin/qtpaths --plugin-dir)
+          plugins=$(echo \
+              "${plugindir}"/imageformats/* \
+              "${plugindir}"/platforminputcontexts/* \
+              "${plugindir}"/platforms/libqxcb.so \
+              "${plugindir}"/platformthemes/* \
+              "${plugindir}"/xcbglintegrations/*
+          )
+          cp ${plugins} "${dst}"/lib/
+
+          exclude_file=$(curl https://raw.githubusercontent.com/AppImage/AppImages/19e30b2/excludelist)
+          exclude_list=$(echo "${exclude_file}" | grep -wo '^[^ #]\+.so\(\.[^ #]\+\)\?' | sort | uniq)
+
+          for obj in "${dst}"/gz-gui "${dst}"/bin/* "${dst}"/lib/*; do
+            ldd "${obj}" | grep -wo '/[^ ]\+\.so\(\.[^ ]\+\)\?' |
+            while read lib; do
+              name=$(basename "${lib}")
+              excluded=$({ echo "${exclude_list}"; echo "${name}"; } | sort | uniq -D )
+              if [ -n "${excluded}" ]; then continue; fi
+              cp "${lib}" "${dst}"/lib/
+            done
+          done
+
+          for obj in "${dst}"/gz-gui "${dst}"/bin/* "${dst}"/lib/*; do
+            libdir=$(realpath --relative-to "$(dirname "${obj}")" "${dst}"/lib)
+            patchelf --set-rpath \$ORIGIN/"${libdir}" "${obj}"
+          done
+
+          ln -s . "${dst}"/lib/platforms
+
+      - name: Create archive
+        run: |
+          pkg="linux-gnu-x86_64"
+          cd "${pkg}"
+          zip -r -y "${pkg}".zip .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-linux-gnu-x86_64
+          path: linux-gnu-x86_64/linux-gnu-x86_64.zip

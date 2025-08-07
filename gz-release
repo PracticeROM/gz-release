@@ -61,14 +61,17 @@ fi
 machine="`uname -m`"
 
 case "${os}-${machine}" in
+	Darwin-arm64)
+		build_platform="macos-arm64"
+		;;
+	Darwin-x86_64)
+		build_platform="macos-x86_64"
+		;;
 	GNU/Linux-x86_64)
 		build_platform="linux-gnu-x86_64"
 		;;
 	Msys-*)
-		build_platform="windows-i686"
-		;;
-	Darwin-x86_64)
-		build_platform="macos-x86_64"
+		build_platform="windows-x86_64"
 		;;
 	*)
 		build_platform=""
@@ -162,6 +165,19 @@ if [ "${src_dir}" = "-" ]; then
 	git -C "${src_dir}" submodule update --init --recursive
 fi
 
+version_suffix=""
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+	toplevel="`git rev-parse --show-toplevel`"
+
+	real_pwd="`realpath "${PWD}"`"
+	real_top="`realpath "${toplevel}"`"
+	real_src="`realpath "${src_dir}"`"
+
+	if [ "${real_pwd}" = "${real_top}" ] && [ "${real_pwd}" != "${real_src}" ]; then
+		version_suffix="+`git rev-parse --short HEAD`"
+	fi
+fi
+
 if [ "${nomake}" = "no" ]; then
 	if [ "${y}" = "no" ]; then
 		if ! type mips64-gcc >/dev/null 2>&1 && \
@@ -205,7 +221,7 @@ if [ "${nomake}" = "no" ]; then
 		fi
 
 		if [ -z "${pkg_version}" ]; then
-			pkg_version="`git describe --tags --match 'v[0-9]*' --dirty`"
+			pkg_version="`git describe --tags --match 'v[0-9]*' --dirty`${version_suffix}"
 		fi
 
 		targets="all all-hooks"
@@ -223,7 +239,7 @@ if [ "${nomake}" = "no" ]; then
 fi
 
 if [ -z "${pkg_version}" ]; then
-	pkg_version="`git -C "${src_dir}" describe --tags --match 'v[0-9]*' --dirty`"
+	pkg_version="`git -C "${src_dir}" describe --tags --match 'v[0-9]*' --dirty`${version_suffix}"
 fi
 pkg_string="${pkg_name}-${pkg_version}"
 
@@ -231,26 +247,26 @@ copy_files()
 {
 	mkdir -p "${1}"
 	cp -pR \
-		"common/"* \
-		"${src_dir}/gzi" \
-		"${src_dir}/ups" \
+		common/* \
+		"${src_dir}"/gzi \
+		"${src_dir}"/ups \
 		"${1}"
 
-	mkdir -p "${1}/lua"
+	mkdir -p "${1}"/lua
 	cp -pR \
-		"${src_dir}/lua/rom_table.lua" \
-		"${src_dir}/lua/inject_ucode.lua" \
-		"${1}/lua"
+		"${src_dir}"/lua/rom_table.lua \
+		"${src_dir}"/lua/inject_ucode.lua \
+		"${1}"/lua
 
-	mkdir -p "${1}/homeboy/bin/hb-NACE"
+	mkdir -p "${1}"/homeboy/bin/hb-NACE
 	cp -pR \
-		"${src_dir}/homeboy/bin/hb-NACE/homeboy.bin" \
-		"${1}/homeboy/bin/hb-NACE"
+		"${src_dir}"/homeboy/bin/hb-NACE/homeboy.bin \
+		"${1}"/homeboy/bin/hb-NACE
 
-	mkdir -p "${1}/homeboy/bin/hb-NACJ"
+	mkdir -p "${1}"/homeboy/bin/hb-NACJ
 	cp -pR \
-		"${src_dir}/homeboy/bin/hb-NACJ/homeboy.bin" \
-		"${1}/homeboy/bin/hb-NACJ"
+		"${src_dir}"/homeboy/bin/hb-NACJ/homeboy.bin \
+		"${1}"/homeboy/bin/hb-NACJ
 }
 
 make_release()
@@ -262,73 +278,73 @@ make_release()
 		linux-gnu-x86_64)
 			rm -rf "${cpkg_string}"
 
-			unzip -d "${cpkg_string}" "platforms/${cplatform}.zip"
+			unzip -d "${cpkg_string}" platforms/"${cplatform}".zip
 			copy_files "${cpkg_string}"
 
 			if [ "${cxz}" = "yes" ]; then
 				(cd "${cpkg_string}" && \
-					XZ_OPT=-9 tar -cJf "../${cpkg_string}.tar.xz" .)
+					XZ_OPT=-9 tar -cJf ../"${cpkg_string}".tar.xz .)
 			else
 				(cd "${cpkg_string}" && \
-					GZIP_OPT=-9 tar -czf "../${cpkg_string}.tar.gz" .)
+					GZIP_OPT=-9 tar -czf ../"${cpkg_string}".tar.gz .)
 			fi
 
-			rm -rf "${cpkg_string}"
+			rm -r "${cpkg_string}"
 			;;
-		windows-i686)
+		macos-arm64|macos-x86_64)
 			rm -rf "${cpkg_string}"
 
-			unzip -d "${cpkg_string}" "platforms/${cplatform}.zip"
+			unzip -d "${cpkg_string}" platforms/"${cplatform}".zip
+			copy_files "${cpkg_string}"/gz-gui.app/Contents/Resources
+			cp -pR common/readme.url "${cpkg_string}"
+
+			if [ "${build_platform}" = "macos-arm64" ] || [ "${build_platform}" = "macos-x86_64" ]; then
+				hdiutil create -ov -volname "${pkg_name}" -srcfolder "${cpkg_string}" \
+					"${cpkg_string}".dmg
+			else
+				img_size="`du -sb ${cpkg_string} | awk '{print $1}'`"
+				img_size="$(( (${img_size} + 1024*1024 - 1) / (1024*1024) + 8 ))"
+
+				dd if=/dev/zero of="${cpkg_string}".dmg bs=1M count="${img_size}"
+				mkfs.hfsplus -v "${pkg_name}" "${cpkg_string}".dmg
+
+				mkdir "${cpkg_string}".mnt
+				if type guestmount >/dev/null 2>&1; then
+					guestmount --format=raw -a "${cpkg_string}".dmg -m /dev/sda \
+						-w "${cpkg_string}".mnt
+				else
+					sudo mount -o loop "${cpkg_string}".dmg "${cpkg_string}".mnt
+					sudo chmod 0777 "${cpkg_string}".mnt
+				fi
+
+				cp -pR "${cpkg_string}"/* "${cpkg_string}".mnt
+				sync
+
+				if type guestunmount >/dev/null 2>&1; then
+					guestunmount "${cpkg_string}".mnt
+				else
+					sudo umount "${cpkg_string}".mnt
+				fi
+
+				rmdir "${cpkg_string}".mnt
+			fi
+			rm -r "${cpkg_string}"
+			;;
+		windows-x86_64)
+			rm -rf "${cpkg_string}"
+
+			unzip -d "${cpkg_string}" platforms/"${cplatform}".zip
 			copy_files "${cpkg_string}"
 
 			if [ "${c7z}" = "yes" ]; then
 				(cd "${cpkg_string}" && \
-					7z a -m0=lzma2 -mx=9 -ms=on "../${cpkg_string}.7z" .)
+					7z a -m0=lzma2 -mx=9 -ms=on ../"${cpkg_string}".7z .)
 			else
 				(cd "${cpkg_string}" && \
-					zip -9 -r "../${cpkg_string}.zip" .)
+					zip -9 -r ../"${cpkg_string}".zip .)
 			fi
 
-			rm -rf "${cpkg_string}"
-			;;
-		macos-x86_64)
-			rm -rf "${cpkg_string}"
-
-			unzip -d "${cpkg_string}" "platforms/${cplatform}.zip"
-			copy_files "${cpkg_string}/gz-gui.app/Contents/Resources"
-			cp -pR "common/readme.url" "${cpkg_string}"
-
-			if [ "$build_platform" = "macos-x86_64" ]; then
-				hdiutil create -ov -volname "${pkg_name}" -srcfolder "${cpkg_string}" \
-					"${cpkg_string}.dmg"
-			else
-				img_size="`du -sb ${cpkg_string} | awk '{print $1}'`"
-				img_size="$(( (${img_size}+1024*1024-1) / (1024*1024) + 1 ))"
-
-				dd if=/dev/zero of="${cpkg_string}.dmg" bs=1M count="${img_size}"
-				mkfs.hfsplus -v "${pkg_name}" "${cpkg_string}.dmg"
-
-				mkdir "${cpkg_string}.mnt"
-				if type guestmount >/dev/null 2>&1; then
-					guestmount --format=raw -a "${cpkg_string}.dmg" -m /dev/sda \
-						-w "${cpkg_string}.mnt"
-				else
-					sudo mount -o loop "${cpkg_string}.dmg" "${cpkg_string}.mnt"
-					sudo chmod 0777 "${cpkg_string}.mnt"
-				fi
-
-				cp -pR "${cpkg_string}"/* "${cpkg_string}.mnt"
-				sync
-
-				if type guestunmount >/dev/null 2>&1; then
-					guestunmount "${cpkg_string}.mnt"
-				else
-					sudo umount "${cpkg_string}.mnt"
-				fi
-
-				rmdir "${cpkg_string}.mnt"
-			fi
-			rm -rf "${cpkg_string}"
+			rm -r "${cpkg_string}"
 			;;
 		*)
 			echo 'unknown platform: '"${cplatform}"
@@ -338,7 +354,7 @@ make_release()
 }
 
 if [ "${platform}" = "all" ]; then
-	all_platforms="linux-gnu-x86_64 windows-i686 macos-x86_64"
+	all_platforms="linux-gnu-x86_64 macos-arm64 macos-x86_64 windows-x86_64"
 
 	for platform in ${all_platforms}; do
 		make_release "${platform}"

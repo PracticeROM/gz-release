@@ -1,0 +1,114 @@
+name: Build macos-arm64 platform package
+
+on:
+  workflow_call:
+    inputs:
+      repository:
+        type: string
+        default: PracticeROM/gz-release
+      ref:
+        type: string
+        default: master
+
+jobs:
+  build:
+    name: Build macos-arm64 platform package
+    runs-on: macos-15
+
+    steps:
+      - name: Setup Homebrew
+        id: set-up-homebrew
+        uses: Homebrew/actions/setup-homebrew@main
+
+      - name: Update homebrew package index
+        run: |
+          brew update
+
+      - name: Install homebrew packages
+        run: |
+          brew install lua@5.4 qt@5
+
+      - name: Checkout gz-release
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.ref }}
+          path: gz-release
+
+      - name: Checkout n64 tools
+        uses: actions/checkout@v4
+        with:
+          repository: glankk/n64
+          ref: b8e79f360999b548d3bcdeab8bc43f7a9ccc1719
+          path: n64
+
+      - name: Build n64 tools
+        run: |
+          cd n64
+          ./configure --without-toolchain \
+            CPPFLAGS="-I$(brew --prefix lua)/include" \
+            LDFLAGS="-L$(brew --prefix lua)/lib"
+          make all-ed64rdb all-libgru
+
+      - name: Checkout gzinject
+        uses: actions/checkout@v4
+        with:
+          repository: PracticeROM/gzinject
+          ref: e0ce0c892c4c83e7433f808ecb9fc50d42815de2
+          path: gzinject
+
+      - name: Build gzinject
+        run: |
+          cd gzinject
+          ./configure
+          make
+
+      - name: Checkout gz-gui
+        uses: actions/checkout@v4
+        with:
+          repository: glankk/gz-gui
+          ref: 9f5b747a27823cdb4b99466eceb1f50fa5c446fb
+          path: gz-gui
+
+      - name: Build gz-gui
+        run: |
+          cd gz-gui
+          /opt/homebrew/opt/qt@5/bin/qmake
+          make release
+          /opt/homebrew/opt/qt@5/bin/macdeployqt gz-gui.app
+
+      - name: Install files
+        run: |
+          pkg="macos-arm64"
+          src="gz-release/platforms/${pkg}"
+          dst="${pkg}/gz-gui.app/Contents/Resources"
+
+          mkdir -p "${dst}"
+          mkdir "${dst}"/bin/
+          mkdir "${dst}"/lib/
+
+          cp -r gz-gui/gz-gui.app "${pkg}"
+          cp "${src}"/{inject_ucode,patch-rom,patch-wad} "${dst}"/
+          install -s n64/src/{ed64rdb/ed64rdb,libgru/gru} "${dst}"/bin/
+          install -s gzinject/gzinject "${dst}"/bin/
+
+          for prog in "${dst}"/bin/*; do
+            otool -L "${prog}" | grep -wo '/opt/homebrew/[^ ]\+\.dylib' |
+            while read lib; do
+              name=$(basename "${lib}")
+              cp "${lib}" "${dst}"/lib/
+              install_name_tool -change "${lib}" @executable_path/../lib/"${name}" "${prog}"
+            done
+          done
+
+      - name: Create archive
+        run: |
+          pkg="macos-arm64"
+          cd "${pkg}"
+          zip -r -y "${pkg}".zip .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-macos-arm64
+          path: macos-arm64/macos-arm64.zip

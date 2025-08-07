@@ -1,0 +1,106 @@
+name: Build windows-x86_64 platform package
+
+on:
+  workflow_call:
+    inputs:
+      repository:
+        type: string
+        default: PracticeROM/gz-release
+      ref:
+        type: string
+        default: master
+
+jobs:
+  build:
+    name: Build windows-x86_64 platform package
+    runs-on: windows-2025
+
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Setup msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+
+      - name: Update msys2 package index
+        run: |
+          pacman -Sy
+
+      - name: Install msys2 packages
+        run: |
+          pacman -S --noconfirm base-devel git mingw-w64-x86_64-gcc mingw-w64-x86_64-lua mingw-w64-x86_64-qt5-static zip
+
+      - name: Checkout gz-release
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.ref }}
+          path: gz-release
+
+      - name: Checkout n64 tools
+        uses: actions/checkout@v4
+        with:
+          repository: glankk/n64
+          ref: b8e79f360999b548d3bcdeab8bc43f7a9ccc1719
+          path: n64
+
+      - name: Build n64 tools
+        run: |
+          cd n64
+          ./configure --without-toolchain --enable-static-executables
+          make all-ed64rdb all-libgru
+
+      - name: Checkout gzinject
+        uses: actions/checkout@v4
+        with:
+          repository: PracticeROM/gzinject
+          ref: e0ce0c892c4c83e7433f808ecb9fc50d42815de2
+          path: gzinject
+
+      - name: Build gzinject
+        run: |
+          cd gzinject
+          ./configure LDFLAGS='-static'
+          make
+
+      - name: Checkout gz-gui
+        uses: actions/checkout@v4
+        with:
+          repository: glankk/gz-gui
+          ref: 9f5b747a27823cdb4b99466eceb1f50fa5c446fb
+          path: gz-gui
+
+      - name: Build gz-gui
+        run: |
+          cd gz-gui
+          /mingw64/qt5-static/bin/qmake
+          make release
+
+      - name: Install files
+        run: |
+          pkg="windows-x86_64"
+          src="gz-release/platforms/${pkg}"
+          dst="${pkg}"
+
+          mkdir -p "${dst}"
+          mkdir "${dst}"/bin/
+
+          install -s gz-gui/release/gz-gui "${dst}"
+          cp "${src}"/{inject_ucode.bat,patch-rom.bat,patch-wad.bat} "${dst}"/
+          install -s n64/src/{ed64rdb/ed64rdb,libgru/gru} "${dst}"/bin/
+          install -s gzinject/gzinject "${dst}"/bin/
+
+      - name: Create archive
+        run: |
+          pkg="windows-x86_64"
+          cd "${pkg}"
+          zip -r -y "${pkg}".zip .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-windows-x86_64
+          path: windows-x86_64/windows-x86_64.zip

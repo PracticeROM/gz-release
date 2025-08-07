@@ -1,0 +1,3 @@
+#!/bin/sh
+
+bin/gru lua/patch-rom.lua "$@"

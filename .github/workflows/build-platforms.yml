@@ -1,0 +1,40 @@
+name: Build platform packages
+
+on:
+  workflow_call:
+    inputs:
+      repository:
+        type: string
+        default: ${{ github.repository }}
+      ref:
+        type: string
+        default: ${{ github.ref }}
+
+jobs:
+  build-linux-gnu-x86_64:
+    name: Build linux-gnu-x86_64 platform package
+    uses: ./.github/workflows/build-platforms-linux-gnu-x86_64.yml
+    with:
+      repository: ${{ inputs.repository }}
+      ref: ${{ inputs.ref }}
+
+  build-macos-arm64:
+    name: Build macos-arm64 platform package
+    uses: ./.github/workflows/build-platforms-macos-arm64.yml
+    with:
+      repository: ${{ inputs.repository }}
+      ref: ${{ inputs.ref }}
+
+  build-macos-x86_64:
+    name: Build macos-x86_64 platform package
+    uses: ./.github/workflows/build-platforms-macos-x86_64.yml
+    with:
+      repository: ${{ inputs.repository }}
+      ref: ${{ inputs.ref }}
+
+  build-windows-x86_64:
+    name: Build windows-x86_64 platform package
+    uses: ./.github/workflows/build-platforms-windows-x86_64.yml
+    with:
+      repository: ${{ inputs.repository }}
+      ref: ${{ inputs.ref }}

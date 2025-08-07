@@ -1,0 +1,7 @@
+#!/bin/sh
+
+GZINJECT=bin/gzinject
+export GZINJECT
+echo 45e | bin/gzinject -a genkey -k common-key.bin >/dev/null
+bin/gru lua/patch-wad.lua "$@"
+rm -rf common-key.bin wadextract
