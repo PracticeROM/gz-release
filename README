@@ -6,6 +6,8 @@ Requires:
 - unzip
 - gzip or xz for creating linux releases
 - zip or 7zip for creating windows releases
-- hfsprogs and guestmount for creating macos releases on linux
+- genisoimage, or hfsprogs with guestmount or sudo for mounting hfs images for
+  creating macos releases on linux, optionally with dmg from libdmg-hfsplus for
+  compression.
 
 See ./gz-release for usage.

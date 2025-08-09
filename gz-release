@@ -301,32 +301,52 @@ make_release()
 			if [ "${build_platform}" = "macos-arm64" ] || [ "${build_platform}" = "macos-x86_64" ]; then
 				hdiutil create -ov -volname "${pkg_name}" -srcfolder "${cpkg_string}" \
 					"${cpkg_string}".dmg
+				hdiutil convert "${cpkg_string}".dmg -format UDZO -o "${cpkg_string}".compressed.dmg
+				mv "${cpkg_string}".compressed.dmg "${cpkg_string}".dmg
 			else
-				img_size="`du -sb ${cpkg_string} | awk '{print $1}'`"
-				img_size="$(( (${img_size} + 1024*1024 - 1) / (1024*1024) + 8 ))"
-
-				dd if=/dev/zero of="${cpkg_string}".dmg bs=1M count="${img_size}"
-				mkfs.hfsplus -v "${pkg_name}" "${cpkg_string}".dmg
-
-				mkdir "${cpkg_string}".mnt
-				if type guestmount >/dev/null 2>&1; then
-					guestmount --format=raw -a "${cpkg_string}".dmg -m /dev/sda \
-						-w "${cpkg_string}".mnt
-				else
-					sudo mount -o loop "${cpkg_string}".dmg "${cpkg_string}".mnt
-					sudo chmod 0777 "${cpkg_string}".mnt
+				if [ -z "${GENISOIMAGE}" ] && type genisoimage >/dev/null 2>&1; then
+					GENISOIMAGE=genisoimage
 				fi
 
-				cp -pR "${cpkg_string}"/* "${cpkg_string}".mnt
-				sync
-
-				if type guestunmount >/dev/null 2>&1; then
-					guestunmount "${cpkg_string}".mnt
-				else
-					sudo umount "${cpkg_string}".mnt
+				if [ -z "${DMG}" ] && type dmg >/dev/null 2>&1; then
+					DMG=dmg
 				fi
 
-				rmdir "${cpkg_string}".mnt
+				if [ -n "${GENISOIMAGE}" ]; then
+					${GENISOIMAGE} -V "${pkg_name}" -D -r -part -no-pad -apple \
+						-o "${cpkg_string}".dmg "${cpkg_string}"
+				else
+					img_size="`du -sb ${cpkg_string} | awk '{print $1}'`"
+					img_size="$(( (${img_size} + 1024*1024 - 1) / (1024*1024) + 8 ))"
+
+					dd if=/dev/zero of="${cpkg_string}".dmg bs=1M count="${img_size}"
+					mkfs.hfsplus -v "${pkg_name}" "${cpkg_string}".dmg
+
+					mkdir "${cpkg_string}".mnt
+					if type guestmount >/dev/null 2>&1; then
+						guestmount --format=raw -a "${cpkg_string}".dmg -m /dev/sda \
+							-w "${cpkg_string}".mnt
+					else
+						sudo mount -o loop "${cpkg_string}".dmg "${cpkg_string}".mnt
+						sudo chmod 0777 "${cpkg_string}".mnt
+					fi
+
+					cp -pR "${cpkg_string}"/* "${cpkg_string}".mnt
+					sync
+
+					if type guestunmount >/dev/null 2>&1; then
+						guestunmount "${cpkg_string}".mnt
+					else
+						sudo umount "${cpkg_string}".mnt
+					fi
+
+					rmdir "${cpkg_string}".mnt
+				fi
+
+				if [ -n "${DMG}" ]; then
+					dmg -c zlib -l 9 dmg "${cpkg_string}".dmg "${cpkg_string}".compressed.dmg
+					mv "${cpkg_string}".compressed.dmg "${cpkg_string}".dmg
+				fi
 			fi
 			rm -r "${cpkg_string}"
 			;;
