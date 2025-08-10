@@ -101,6 +101,8 @@ jobs:
             done
           done
 
+          codesign --force --deep --sign - "${pkg}"/gz-gui.app
+
       - name: Create archive
         run: |
           pkg="macos-arm64"
