@@ -167,14 +167,15 @@ fi
 
 version_suffix=""
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-	toplevel="`git rev-parse --show-toplevel`"
+	rel_short="`git rev-parse --short HEAD`"
+	src_short=""
 
-	real_pwd="`realpath "${PWD}"`"
-	real_top="`realpath "${toplevel}"`"
-	real_src="`realpath "${src_dir}"`"
+	if git -C "${src_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+		src_short="`git -C "${src_dir}" rev-parse --short HEAD`"
+	fi
 
-	if [ "${real_pwd}" = "${real_top}" ] && [ "${real_pwd}" != "${real_src}" ]; then
-		version_suffix="+`git rev-parse --short HEAD`"
+	if [ "${rel_short}" != "${src_short}" ]; then
+		version_suffix="+${rel_short}"
 	fi
 fi
 
@@ -299,17 +300,28 @@ make_release()
 			cp -pR common/readme.url "${cpkg_string}"
 
 			if [ "${build_platform}" = "macos-arm64" ] || [ "${build_platform}" = "macos-x86_64" ]; then
+				codesign --deep --force --sign - "${cpkg_string}"/gz-gui.app
 				hdiutil create -ov -volname "${pkg_name}" -srcfolder "${cpkg_string}" \
 					"${cpkg_string}".dmg
 				hdiutil convert "${cpkg_string}".dmg -format UDZO -o "${cpkg_string}".compressed.dmg
 				mv "${cpkg_string}".compressed.dmg "${cpkg_string}".dmg
 			else
+				if [ -z "${RCODESIGN}" ] && type rcodesign >/dev/null 2>&1; then
+					RCODESIGN=rcodesign
+				fi
+
 				if [ -z "${GENISOIMAGE}" ] && type genisoimage >/dev/null 2>&1; then
 					GENISOIMAGE=genisoimage
+				elif [ -z "${GENISOIMAGE}" ] && type mkisofs >/dev/null 2>&1; then
+					GENISOIMAGE=mkisofs
 				fi
 
 				if [ -z "${DMG}" ] && type dmg >/dev/null 2>&1; then
 					DMG=dmg
+				fi
+
+				if [ -n "${RCODESIGN}" ]; then
+					"${RCODESIGN}" sign "${cpkg_string}"/gz-gui.app
 				fi
 
 				if [ -n "${GENISOIMAGE}" ]; then
