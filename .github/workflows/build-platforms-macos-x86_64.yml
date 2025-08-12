@@ -97,6 +97,7 @@ jobs:
             while read lib; do
               name=$(basename "${lib}")
               cp "${lib}" "${dst}"/lib/
+              chmod 0644 "${dst}"/lib/"${name}"
               install_name_tool -change "${lib}" @executable_path/../lib/"${name}" "${prog}"
             done
           done
