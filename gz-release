@@ -301,10 +301,14 @@ make_release()
 
 			if [ "${build_platform}" = "macos-arm64" ] || [ "${build_platform}" = "macos-x86_64" ]; then
 				codesign --deep --force --sign - "${cpkg_string}"/gz-gui.app
-				hdiutil create -ov -volname "${pkg_name}" -srcfolder "${cpkg_string}" \
+
+				hdiutil create -ov -volname "${pkg_string}" -srcfolder "${cpkg_string}" \
 					"${cpkg_string}".dmg
+
 				hdiutil convert "${cpkg_string}".dmg -format UDZO -o "${cpkg_string}".compressed.dmg
 				mv "${cpkg_string}".compressed.dmg "${cpkg_string}".dmg
+
+				codesign --force --sign - "${cpkg_string}".dmg
 			else
 				if [ -z "${RCODESIGN}" ] && type rcodesign >/dev/null 2>&1; then
 					RCODESIGN=rcodesign
@@ -325,14 +329,14 @@ make_release()
 				fi
 
 				if [ -n "${GENISOIMAGE}" ]; then
-					${GENISOIMAGE} -V "${pkg_name}" -D -r -part -no-pad -apple \
+					${GENISOIMAGE} -V "${pkg_string}" -D -r -part -no-pad -apple \
 						-o "${cpkg_string}".dmg "${cpkg_string}"
 				else
 					img_size="`du -sb ${cpkg_string} | awk '{print $1}'`"
 					img_size="$(( (${img_size} + 1024*1024 - 1) / (1024*1024) + 8 ))"
 
 					dd if=/dev/zero of="${cpkg_string}".dmg bs=1M count="${img_size}"
-					mkfs.hfsplus -v "${pkg_name}" "${cpkg_string}".dmg
+					mkfs.hfsplus -v "${pkg_string}" "${cpkg_string}".dmg
 
 					mkdir "${cpkg_string}".mnt
 					if type guestmount >/dev/null 2>&1; then
@@ -359,7 +363,12 @@ make_release()
 					dmg -c zlib -l 9 dmg "${cpkg_string}".dmg "${cpkg_string}".compressed.dmg
 					mv "${cpkg_string}".compressed.dmg "${cpkg_string}".dmg
 				fi
+
+				if [ -n "${RCODESIGN}" ]; then
+					"${RCODESIGN}" sign "${cpkg_string}".dmg
+				fi
 			fi
+
 			rm -r "${cpkg_string}"
 			;;
 		windows-x86_64)
